@@ -1,21 +1,22 @@
-version: "3.9"
 services:
   backend:
-    build: ./backend
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: sheet2schema_backend
     ports:
-      - "8000:8000"
+      - "8001:8001"
     volumes:
       - ./backend:/app
     env_file:
       - .env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
   frontend:
     build: ./frontend
     container_name: sheet2schema_frontend
     ports:
-      - "3000:3000"
+      - "3001:3001"
     volumes:
       - ./frontend:/app
     environment:
