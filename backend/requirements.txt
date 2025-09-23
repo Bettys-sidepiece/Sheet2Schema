@@ -1,0 +1,8 @@
+fastapi # Web framework for building APIs
+uvicorn[standard]   # ASGI server for FastAPI
+pandas # For data manipulation and analysis
+python-multipart # For handling file uploads
+openpyxl # For Excel file handling
+
+sqlalchemy # For database interactions
+alembic # For database migrations

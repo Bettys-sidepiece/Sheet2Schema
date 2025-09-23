@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual envs
+.env
+.venv
+env/
+venv/
+
+# Git
+.git
+.gitignore
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Local files
+*.sqlite3
+*.log
