@@ -6,7 +6,6 @@ from app.services.schema_infer import normalize_columns, validate_schema
 def get_schema(file_bytes: bytes,
                filename: str,
                has_headers:bool=True,
-               with_id:bool = False,
                with_row_count:bool = True,
                with_preview:bool = False
             ) -> Dict[str, Any]:
@@ -40,14 +39,6 @@ def get_schema(file_bytes: bytes,
     df.columns = [col["normalized"] for col in normalized]
 
     schema = []
-    
-    #Optionally add an ID column
-    if with_id:
-        schema.append({"name": "id",
-                       "inferred_type": "integer",
-                       "nullable": False,
-                       "is_primary_key": True,
-                       })
 
     for idx, (col, dtype) in enumerate(zip(df.columns, df.dtypes)):
         schema.append({

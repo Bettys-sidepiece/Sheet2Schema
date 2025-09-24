@@ -1,5 +1,7 @@
+#api/routes.py
+
 from fastapi import FastAPI, UploadFile, File, Query, HTTPException, status #type: ignore
-from fastapi.responses import JSONResponse, PlainTextResponse #type: ignore
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse#type: ignore
 from app.services.file_parser import get_schema
 from app.services.sql_generator import generate_sql
 from app.services.orm_generator import generate_orm
@@ -29,15 +31,21 @@ class LinkModel(BaseModel):
     from_field:str
     to_field:str
     
+class SessionNameModel(BaseModel):
+    schema_name: str
+    
+class TableNameModel(BaseModel):
+    table_name: str
+    new_name: str
+    
 #Endpoints
 app = FastAPI(title=TITLE, version=VERSION)
 
-@app.post("/upload")
+@app.post("/api/upload")
 async def upload_file(
     file: UploadFile = File(...),
     session_id: str = Query(None),
     has_headers: bool = Query(True),
-    with_id: bool = Query(False),
     with_row_count: bool = Query(False),
     with_preview: bool = Query(False),
     deep_check: bool = Query(False, description="Enable statistical validation for link suggestions?")
@@ -52,7 +60,6 @@ async def upload_file(
             file_bytes,
             file.filename,
             has_headers=has_headers,
-            with_id=with_id,
             with_row_count=with_row_count,
             with_preview=with_preview
         )
@@ -64,7 +71,13 @@ async def upload_file(
 
         if not session_id:
             session_id = str(uuid.uuid4())
-            SESSIONS[session_id] = {"tables": [], "links": [], "suggested_links": [], "dfs": {}}
+            SESSIONS[session_id] = {
+                "tables": [],
+                "links": [],
+                "suggested_links": [],
+                "dfs": {},
+                "schema_name": None
+            }
 
         # store schema + dataframe
         table_name = file.filename.split(".")[0]
@@ -113,7 +126,7 @@ async def upload_file(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/accept_link")
+@app.post("/api/accept_link")
 def accept_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
@@ -144,7 +157,7 @@ def accept_link(link: LinkModel):
     )
 
 
-@app.post("/reject_link")
+@app.post("/api/reject_link")
 def reject_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
@@ -172,15 +185,65 @@ def reject_link(link: LinkModel):
         status_code=status.HTTP_200_OK
     )
 
-
-@app.get("/session/{session_id}")
-def get_session(session_id: str):
+@app.post("/api/set_session_name/{session_id}")
+def set_session_name(session_id: str, name_model: SessionNameModel):
     session = SESSIONS.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    return session
     
-@app.post("/link")
+    session["schema_name"] = name_model.schema_name.strip()
+    
+    return JSONResponse(
+        content={
+            "session_id": session_id,
+            "schema_name": session["schema_name"],
+            "message": f"Session {session_id} name set to {session['schema_name']} successfully"
+        },
+        status_code=status.HTTP_200_OK
+    )
+
+@app.post("/api/session/{session_id}/rename_table")
+def rename_table(session_id: str, body: TableNameModel):
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    table = next((t for t in session["tables"] if t["name"] == body.table_name), None)
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found in session")
+
+    old_name = table["name"]
+    table["name"] = body.new_name.strip()
+
+    return JSONResponse(
+        content={
+            "session_id": session_id,
+            "old_name": old_name,
+            "new_name": table["name"],
+            "message": f"{session_id}: Table {old_name} renamed to {table['name']} successfully"
+        },
+        status_code=status.HTTP_200_OK
+    )
+
+@app.get("/api/session/{session_id}")
+def get_session(session_id: str):
+    """Get session details by session ID.
+
+    Args:
+        session_id (str): The ID of the session to retrieve.
+
+    Raises:
+        HTTPException: If the session is not found.
+
+    Returns:
+        _type_: The session details including tables, links, and suggested links.
+    """
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return JSONResponse(content=session, status_code=status.HTTP_200_OK)
+    
+@app.post("/api/link")
 def add_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
@@ -193,7 +256,7 @@ def add_link(link: LinkModel):
         status_code=status.HTTP_201_CREATED
         )
 
-@app.get("/generate/{session_id}")
+@app.get("/api/generate/{session_id}")
 def generate_artifacts(
     session_id: str,
     format: str = Query("sql", enum=["sql", "orm"]),
@@ -212,20 +275,45 @@ def generate_artifacts(
 
     if as_json:
         # Return as {"sql": [...]} or {"orm": [...]}
-        return JSONResponse({format: result})
+        return JSONResponse(
+            content={
+                "format": format,
+                "filename": f"{session.get('schema_name') or session_id}.{ 'sql' if format == 'sql' else 'py'}",
+                "content": result
+            },
+            status_code=status.HTTP_200_OK
+        )
     else:
         # Return as plain text, line-joined
         return PlainTextResponse("\n".join(result))
 
 
-@app.get("/download/{file_id}")
-async def download_output(file_id: str):
-    #TODO: return processed schema file
-    return {"file_id": file_id, "status": "Download link generated"}
+@app.get("/api/download/{session_id}")
+async def download_output(session_id: str, format: str = Query("sql", enum=["sql", "orm"])):
+    
+    session = SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if format == "sql":
+        result = generate_sql(session)
+        filename = f"{session.get('schema_name')}.sql"
+    else:
+        result = generate_orm(session)
+        filename = f"{session.get('schema_name')}.py"
+    
+    file_content = "\n".join(result)
+    buffer = BytesIO(file_content.encode('utf-8'))
+    
+    return StreamingResponse(
+        buffer,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 ##Session Management
-@app.delete("/reset_session/{session_id}")
+@app.delete("/api/reset_session/{session_id}")
 def reset_session(session_id:str):
     if session_id in SESSIONS:
         temp_id = session_id
@@ -237,7 +325,7 @@ def reset_session(session_id:str):
     else:
         raise HTTPException(status_code=404, detail="Session not found")
 
-@app.delete("/reset_all_sessions")
+@app.delete("/api/reset_all_sessions")
 def reset_all_sessions():
     if not SESSIONS:
         raise HTTPException(status_code=404, detail="No active sessions to reset")
@@ -247,7 +335,7 @@ def reset_all_sessions():
         status_code=status.HTTP_200_OK
     )
 
-@app.get("/list_sessions")
+@app.get("/api/list_sessions")
 async def list_sessions():
 
     if not SESSIONS:
