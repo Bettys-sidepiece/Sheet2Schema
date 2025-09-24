@@ -3,6 +3,8 @@ uvicorn[standard]   # ASGI server for FastAPI
 pandas # For data manipulation and analysis
 python-multipart # For handling file uploads
 openpyxl # For Excel file handling
+pydantic # For data validation and settings management
 
 sqlalchemy # For database interactions
 alembic # For database migrations
+uuid # For generating unique identifiers

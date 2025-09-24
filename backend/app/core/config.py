@@ -1,0 +1,5 @@
+VERSION = "0.2.0"
+TITLE = "Sheet2Schema API"
+REPO = "https://github.com/Bettys-sidepiece/Sheet2Schema"
+LICENSE = "GNU General Public License v3.0"
+WEBSITE = "https://sheet2schema.com"
