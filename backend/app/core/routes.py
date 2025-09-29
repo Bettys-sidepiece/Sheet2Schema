@@ -10,7 +10,7 @@ def root():
 def get_credits():
     return {
         "Developer": "Kuzipa Mumba",
-        "Version": "0.2.0",
+        "Version": "0.5.0",
         "Repository": "https://github.com/Bettys-sidepiece/Sheet2Schema",
         "License": "GNU GPL v3.0",
         "Website": "https://sheet2schema.com",

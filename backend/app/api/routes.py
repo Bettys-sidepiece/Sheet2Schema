@@ -1,23 +1,21 @@
 #api/routes.py
 
-from fastapi import FastAPI, UploadFile, File, Query, HTTPException, status #type: ignore
+from fastapi import APIRouter, UploadFile, File, Query, HTTPException, status #type: ignore
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse#type: ignore
-from app.services.file_parser import get_schema
-from app.services.sql_generator import generate_sql
-from app.services.orm_generator import generate_orm
 from typing import List
 from pydantic import BaseModel #type: ignore
 import uuid
 from io import BytesIO
 
-from app.core.config import (TITLE, VERSION,)
 
+from app.services.file_parser import get_schema
+from app.services.sql_generator import generate_sql
+from app.services.orm_generator import generate_orm
 from app.services.link_suggester import (
     suggest_links_by_name,
     boost_links_by_type,
     validate_links_by_overlap,
 )
-
 from app.services.schema_infer import (
     ensure_primary_key,
     validate_schema,
@@ -39,9 +37,9 @@ class TableNameModel(BaseModel):
     new_name: str
     
 #Endpoints
-app = FastAPI(title=TITLE, version=VERSION)
+router = APIRouter()
 
-@app.post("/api/upload")
+@router.post("/api/upload")
 async def upload_file(
     file: UploadFile = File(...),
     session_id: str = Query(None),
@@ -126,7 +124,7 @@ async def upload_file(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/accept_link")
+@router.post("/api/accept_link")
 def accept_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
@@ -157,7 +155,7 @@ def accept_link(link: LinkModel):
     )
 
 
-@app.post("/api/reject_link")
+@router.post("/api/reject_link")
 def reject_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
@@ -185,7 +183,7 @@ def reject_link(link: LinkModel):
         status_code=status.HTTP_200_OK
     )
 
-@app.post("/api/set_session_name/{session_id}")
+@router.post("/api/set_session_name/{session_id}")
 def set_session_name(session_id: str, name_model: SessionNameModel):
     session = SESSIONS.get(session_id)
     if not session:
@@ -202,7 +200,7 @@ def set_session_name(session_id: str, name_model: SessionNameModel):
         status_code=status.HTTP_200_OK
     )
 
-@app.post("/api/session/{session_id}/rename_table")
+@router.post("/api/session/{session_id}/rename_table")
 def rename_table(session_id: str, body: TableNameModel):
     session = SESSIONS.get(session_id)
     if not session:
@@ -225,7 +223,7 @@ def rename_table(session_id: str, body: TableNameModel):
         status_code=status.HTTP_200_OK
     )
 
-@app.get("/api/session/{session_id}")
+@router.get("/api/session/{session_id}")
 def get_session(session_id: str):
     """Get session details by session ID.
 
@@ -243,7 +241,7 @@ def get_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     return JSONResponse(content=session, status_code=status.HTTP_200_OK)
     
-@app.post("/api/link")
+@router.post("/api/link")
 def add_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
@@ -256,7 +254,7 @@ def add_link(link: LinkModel):
         status_code=status.HTTP_201_CREATED
         )
 
-@app.get("/api/generate/{session_id}")
+@router.get("/api/generate/{session_id}")
 def generate_artifacts(
     session_id: str,
     format: str = Query("sql", enum=["sql", "orm"]),
@@ -288,7 +286,7 @@ def generate_artifacts(
         return PlainTextResponse("\n".join(result))
 
 
-@app.get("/api/download/{session_id}")
+@router.get("/api/download/{session_id}")
 async def download_output(session_id: str, format: str = Query("sql", enum=["sql", "orm"])):
     
     session = SESSIONS.get(session_id)
@@ -313,7 +311,7 @@ async def download_output(session_id: str, format: str = Query("sql", enum=["sql
 
 
 ##Session Management
-@app.delete("/api/reset_session/{session_id}")
+@router.delete("/api/reset_session/{session_id}")
 def reset_session(session_id:str):
     if session_id in SESSIONS:
         temp_id = session_id
@@ -325,7 +323,7 @@ def reset_session(session_id:str):
     else:
         raise HTTPException(status_code=404, detail="Session not found")
 
-@app.delete("/api/reset_all_sessions")
+@router.delete("/api/reset_all_sessions")
 def reset_all_sessions():
     if not SESSIONS:
         raise HTTPException(status_code=404, detail="No active sessions to reset")
@@ -335,7 +333,7 @@ def reset_all_sessions():
         status_code=status.HTTP_200_OK
     )
 
-@app.get("/api/list_sessions")
+@router.get("/api/list_sessions")
 async def list_sessions():
 
     if not SESSIONS:

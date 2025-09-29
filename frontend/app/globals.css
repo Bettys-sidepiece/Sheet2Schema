@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* include plugins */
+@plugin "tailwindcss-animate";
+@plugin "@tailwindcss/typography";
+
+/* Optional: force smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Reset box-sizing */
+* {
+  box-sizing: border-box;
+}
+
+/* Use Poppins (from next/font) everywhere */
+body {
+  @apply font-sans text-gray-900 bg-gray-50;
+}

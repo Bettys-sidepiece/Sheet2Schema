@@ -6,5 +6,5 @@ from app.core.config import (TITLE, VERSION,)
 app = FastAPI(title=TITLE, version=VERSION)
 
 # Include routers
-app.include_router(api_routes.app, prefix="/api", tags=["api"])
+app.include_router(api_routes.router, prefix="/api", tags=["api"])
 app.include_router(core_routes.router, tags=["core"])
