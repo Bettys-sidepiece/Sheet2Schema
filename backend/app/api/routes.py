@@ -1,14 +1,19 @@
 #api/routes.py
 
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException, status #type: ignore
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse#type: ignore
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse #type: ignore
+from fastapi.encoders import jsonable_encoder #type: ignore
 from typing import List
 from pydantic import BaseModel #type: ignore
 import uuid
 from io import BytesIO
+import traceback
 
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-from app.services.file_parser import get_schema
+from app.services.file_parser import get_schema, to_builtin
 from app.services.sql_generator import generate_sql
 from app.services.orm_generator import generate_orm
 from app.services.link_suggester import (
@@ -39,7 +44,7 @@ class TableNameModel(BaseModel):
 #Endpoints
 router = APIRouter()
 
-@router.post("/api/upload")
+@router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     session_id: str = Query(None),
@@ -67,6 +72,8 @@ async def upload_file(
         schema_info["columns"] = schema
         schema_info["validation_warnings"] = pk_warnings + warn
 
+        logger.info(f"File {file.filename} processed. Session ID: {session_id}")
+        # Create new session if not provided
         if not session_id:
             session_id = str(uuid.uuid4())
             SESSIONS[session_id] = {
@@ -76,11 +83,14 @@ async def upload_file(
                 "dfs": {},
                 "schema_name": None
             }
-
+        
+        logger.info(f"Using session ID: {session_id}")
+        
         # store schema + dataframe
         table_name = file.filename.split(".")[0]
         schema_info["name"] = table_name
         SESSIONS[session_id]["tables"].append(schema_info)
+        
 
         import pandas as pd
         if file.filename.endswith(".csv"):
@@ -109,22 +119,25 @@ async def upload_file(
             )
 
         SESSIONS[session_id]["suggested_links"].extend(suggestions)
-
+        logger.info(f"Session {session_id}: Table {table_name} added with {len(schema_info['columns'])} columns. {len(suggestions)} link suggestions generated.")
+        
         return JSONResponse(
-            content={
+            content=to_builtin({
                 "session_id": session_id,
                 "table_added": table_name,
                 "schema": schema_info,
                 "suggested_links": suggestions
-            },
+            }),
             status_code=status.HTTP_201_CREATED if len(SESSIONS[session_id]["tables"]) == 1 else status.HTTP_200_OK
         )
-
+    
     except Exception as e:
+        logger.error(f"Error processing file {file.filename}: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/api/accept_link")
+@router.post("/accept_link")
 def accept_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
@@ -145,17 +158,17 @@ def accept_link(link: LinkModel):
     session["suggested_links"].remove(match)
 
     return JSONResponse(
-        content={
+        content=to_builtin({
             "session_id": link.session_id,
             "accepted_link": match,
             "links": session["links"],
             "remaining_suggestions": session["suggested_links"]
-        },
+        }),
         status_code=status.HTTP_201_CREATED
     )
 
 
-@router.post("/api/reject_link")
+@router.post("/reject_link")
 def reject_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
@@ -175,15 +188,15 @@ def reject_link(link: LinkModel):
     session["suggested_links"].remove(match)
 
     return JSONResponse(
-        content={
+        content=to_builtin({
             "session_id": link.session_id,
             "rejected_link": match,
             "remaining_suggestions": session["suggested_links"]
-        },
+        }),
         status_code=status.HTTP_200_OK
     )
 
-@router.post("/api/set_session_name/{session_id}")
+@router.post("/set_session_name/{session_id}")
 def set_session_name(session_id: str, name_model: SessionNameModel):
     session = SESSIONS.get(session_id)
     if not session:
@@ -192,15 +205,15 @@ def set_session_name(session_id: str, name_model: SessionNameModel):
     session["schema_name"] = name_model.schema_name.strip()
     
     return JSONResponse(
-        content={
+        content=to_builtin({
             "session_id": session_id,
             "schema_name": session["schema_name"],
             "message": f"Session {session_id} name set to {session['schema_name']} successfully"
-        },
+        }),
         status_code=status.HTTP_200_OK
     )
 
-@router.post("/api/session/{session_id}/rename_table")
+@router.post("/session/{session_id}/rename_table")
 def rename_table(session_id: str, body: TableNameModel):
     session = SESSIONS.get(session_id)
     if not session:
@@ -214,16 +227,16 @@ def rename_table(session_id: str, body: TableNameModel):
     table["name"] = body.new_name.strip()
 
     return JSONResponse(
-        content={
+        content=to_builtin({
             "session_id": session_id,
             "old_name": old_name,
             "new_name": table["name"],
             "message": f"{session_id}: Table {old_name} renamed to {table['name']} successfully"
-        },
+        }),
         status_code=status.HTTP_200_OK
     )
 
-@router.get("/api/session/{session_id}")
+@router.get("/session/{session_id}")
 def get_session(session_id: str):
     """Get session details by session ID.
 
@@ -241,20 +254,20 @@ def get_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     return JSONResponse(content=session, status_code=status.HTTP_200_OK)
     
-@router.post("/api/link")
+@router.post("/link")
 def add_link(link: LinkModel):
     session = SESSIONS.get(link.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     session["links"].append({"from": link.from_field,"to": link.to_field})
     return JSONResponse(
-        content={
+        content=to_builtin({
             "session_id": link.session_id, "links": session["links"]
-        },
+        }),
         status_code=status.HTTP_201_CREATED
         )
 
-@router.get("/api/generate/{session_id}")
+@router.get("/generate/{session_id}")
 def generate_artifacts(
     session_id: str,
     format: str = Query("sql", enum=["sql", "orm"]),
@@ -274,11 +287,11 @@ def generate_artifacts(
     if as_json:
         # Return as {"sql": [...]} or {"orm": [...]}
         return JSONResponse(
-            content={
+            content=to_builtin({
                 "format": format,
                 "filename": f"{session.get('schema_name') or session_id}.{ 'sql' if format == 'sql' else 'py'}",
                 "content": result
-            },
+            }),
             status_code=status.HTTP_200_OK
         )
     else:
@@ -286,7 +299,7 @@ def generate_artifacts(
         return PlainTextResponse("\n".join(result))
 
 
-@router.get("/api/download/{session_id}")
+@router.get("/download/{session_id}")
 async def download_output(session_id: str, format: str = Query("sql", enum=["sql", "orm"])):
     
     session = SESSIONS.get(session_id)
@@ -311,7 +324,7 @@ async def download_output(session_id: str, format: str = Query("sql", enum=["sql
 
 
 ##Session Management
-@router.delete("/api/reset_session/{session_id}")
+@router.delete("/reset_session/{session_id}")
 def reset_session(session_id:str):
     if session_id in SESSIONS:
         temp_id = session_id
@@ -323,7 +336,7 @@ def reset_session(session_id:str):
     else:
         raise HTTPException(status_code=404, detail="Session not found")
 
-@router.delete("/api/reset_all_sessions")
+@router.delete("/reset_all_sessions")
 def reset_all_sessions():
     if not SESSIONS:
         raise HTTPException(status_code=404, detail="No active sessions to reset")
@@ -333,14 +346,14 @@ def reset_all_sessions():
         status_code=status.HTTP_200_OK
     )
 
-@router.get("/api/list_sessions")
+@router.get("/list_sessions")
 async def list_sessions():
 
     if not SESSIONS:
         return JSONResponse(content={"sessions": []}, status_code=status.HTTP_200_OK)  # No active sessions
 
     return JSONResponse(
-        content={
+        content=to_builtin({
             "sessions": [
                 {
                     "session_id": sid,
@@ -349,6 +362,6 @@ async def list_sessions():
                     "suggested_link_count": len(data["suggested_links"])
                 } for sid, data in SESSIONS.items()
             ]
-        },
+        }),
         status_code=status.HTTP_200_OK
     )

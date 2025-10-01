@@ -1,7 +1,26 @@
 import pandas as pd
+import numpy as np
 from typing import Dict, Any
 from io import BytesIO
 from app.services.schema_infer import normalize_columns, validate_schema
+
+SQL_RESERVED = {
+    "select", "from", "where", "insert", "update", "delete",
+    "create", "drop", "table", "index", "join", "order", "group"
+}
+
+def to_builtin(obj: Any) -> Any: # Convert numpy types to native Python types for JSON serialization
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: to_builtin(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_builtin(v) for v in obj]
+    return obj
 
 def get_schema(file_bytes: bytes,
                filename: str,
@@ -34,16 +53,37 @@ def get_schema(file_bytes: bytes,
     if not has_headers:
         df.columns = [f"col_{i+1}" for i in range(len(df.columns))]
 
-    #Normalize column names
-    normalized = normalize_columns(df.columns.tolist())
-    df.columns = [col["normalized"] for col in normalized]
+    cols = []
+    used = set()
+
+    for i, col in enumerate(df.columns):
+        original = str(cols).strip()
+        normalized = original.lower().replace(" ", "_")
+
+        # Handle reserved words or duplicates
+        was_reserved = False
+        if normalized in SQL_RESERVED or normalized in used:
+            was_reserved = True
+            normalized = f"{normalized}_{i}"
+
+        used.add(normalized)
+
+        cols.append({
+            "original_name": original,
+            "normalized_name": normalized,
+            "was_reserved": was_reserved,
+        })
+
+    # Only rename dataframe columns if *any* column was reserved/changed
+    if any(c["was_reserved"] or c["normalized_name"] != c["original_name"] for c in cols):
+        df.columns = [c["normalized_name"] for c in cols] 
 
     schema = []
 
     for idx, (col, dtype) in enumerate(zip(df.columns, df.dtypes)):
         schema.append({
             "name": col,
-            "original_name": normalized[idx]["original"],
+            "original_name": cols[idx]["original_name"],
             "inferred_type": str(dtype),
             "nullable": df[col].isnull().any(),
             "is_primary_key": (idx == 0)  # first column as PK if no ID added

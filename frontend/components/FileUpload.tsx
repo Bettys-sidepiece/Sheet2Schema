@@ -23,12 +23,12 @@ export default function FileUpload() {
       formData.append("file", acceptedFiles[0]);
 
       const res = await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL}/upload`,
+        "http://localhost:8001/api/upload",
         formData,
         {
           headers: {
-            "Content-Type": "multipart/form-data",
-          },
+            "Content-Type": "multipart/form-data"
+          }
         }
       )
       console.log("File uploaded successfully:", res.data);
@@ -55,10 +55,10 @@ export default function FileUpload() {
   return (
     <div
       {...getRootProps()}
-      className="cursor-pointer border-2 border-dashed border-gray-300 rounded-2xl bg-white p-12 text-center hover:border-indigo-500 transition"
+      className="cursor-pointer border-2 border-dashed border-gray-300 rounded-4xl bg-white p-15 text-center hover:border-indigo-500 transition"
     >
       <input {...getInputProps()} />
-      <UploadCloud className="mx-auto h-10 w-10 text-gray-400" />
+      <UploadCloud className="mx-auto h-20 w-20 text-gray-400" />
       {isDragActive ? (
         <p className="mt-4 text-indigo-600 font-medium">Drop your file here…</p>
       ) : (

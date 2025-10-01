@@ -47,7 +47,7 @@ def validate_schema(schema: List[Dict]) -> List[str]:
     After auto-fix, no schema should be invalid.
     """
     warnings = []
-    names = [col["name"] for col in schema]
+    names = [col["original_name"] for col in schema]
 
     # Duplicates shouldn't exist after normalize, but double-check
     if len(names) != len(set(names)):
